@@ -1,0 +1,251 @@
+---
+title: "Machine Learning Project : Assignment 2"
+author: "Frederic Anglade"
+date: "September 8, 2019"
+output: 
+    html_document:
+      keep_md: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+# Objectives
+
+###The goal of your project is to predict the manner in which they did the exercise. This is the "classe" variable in the training set. You may use any of the other variables to predict with. You should create a report describing how you built your model, how you used cross validation, what you think the expected out of sample error is, and why you made the choices you did. You will also use your prediction model to predict 20 different test cases. I used data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har.
+
+
+#Load the libraries for this project.
+```{r}
+library(lattice)
+library(ggplot2)
+library(rpart)
+library(rpart.plot)
+suppressWarnings(suppressMessages(library(rattle)))
+suppressWarnings(suppressMessages(library(doParallel)))
+suppressWarnings(suppressMessages(library(caret)))
+suppressWarnings(suppressMessages(library(randomForest)))
+suppressWarnings(suppressMessages(library(e1071)))
+set.seed(24331)
+
+```
+
+
+#Getting the data
+
+The training data set can be found on the following URL:
+```{r}
+trainUrl <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+```
+
+
+The testing data set can be found on the following URL:
+```{r}
+testUrl <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+```
+
+
+
+# Cleaning the dataset
+
+###Remove missing observations
+```{r}
+training <- read.csv(url(trainUrl), na.strings=c("NA","#DIV/0!",""))
+testing <- read.csv(url(testUrl), na.strings=c("NA","#DIV/0!",""))
+training     <-training[,colSums(is.na(training)) == 0]
+dim(training) 
+head(training,3)
+testing <- testing[,colSums(is.na(testing)) == 0]
+dim(testing) 
+head(testing,3)
+
+```
+
+
+Remove the non-predictors from the training and testing set: column 1 to 7 because they are not related to the model.
+```{r}
+training  <-training[,-c(1:7)]
+testing <-testing[,-c(1:7)]
+dim(training)
+dim(testing)
+```
+
+
+
+##Remove the near zero values in training data
+```{r}
+training.nzv<-nzv(training[,-ncol(training)],saveMetrics=TRUE)
+rownames(training.nzv)
+```
+
+
+##We partition the training data into training set and cross validation set
+```{r}
+inTrain     <- createDataPartition(training$classe, p = 0.6, list = FALSE)
+inTraining  <- training[inTrain,]
+inTrain_crossval      <- training[-inTrain,]
+dim(inTraining);dim(inTrain_crossval)
+```
+
+#Model Analysis
+I am trying to use the Decision Tree first to make the model which is a good model to predict the outcome for continuous and categorical variables.
+
+
+#ML Algorithm - Decision Tree
+```{r}
+decisionTreeMod <- train(classe ~., method='rpart', data=inTraining)
+```
+
+##EVALUATION
+
+Check the accuracy of the model by comparing the predictions to the actual results in the confusion matrix
+
+
+```{r}
+decisionTreePrediction <- predict(decisionTreeMod, inTrain_crossval)
+confusionMatrix(inTrain_crossval$classe, decisionTreePrediction)
+```
+
+###Plotting the decision tree
+```{r}
+rpart.plot(decisionTreeMod$finalModel)
+```
+
+
+
+
+##With a 49.86% accuray, the decision tree model is not an ideal model. I decided to use a Random Forest model to improve accurary.
+
+
+
+#ML Algorithm - Random Forest
+##To reduce variance and to  boost the performance in the final model.
+```{r}
+myModelFilename <- "myModel.RData"
+if (!file.exists(myModelFilename)) {
+
+  
+    library(doParallel)
+    ncores <- makeCluster(detectCores() - 1)
+    registerDoParallel(cores=ncores)
+    getDoParWorkers() # 3    
+    
+    # use Random Forest method with Cross Validation, 4 folds
+    myModel <- train(classe ~ .
+                , data = inTraining
+                , method = "rf"
+                , metric = "Accuracy"  # categorical outcome variable so choose accuracy
+                , preProcess=c("center", "scale") # attempt to improve accuracy by normalising
+                , trControl=trainControl(method = "cv"
+                                        , number = 4 # folds of the training data
+                                        , p= 0.60
+                                        , allowParallel = TRUE 
+#                                       , seeds=NA # don't let workers set seed 
+                                        )
+                )
+
+    save(myModel, file = "myModel.RData")
+    stopCluster(ncores)
+} else {
+    # Use cached model  
+    load(file = myModelFilename, verbose = TRUE)
+}
+```
+
+
+
+```{r}
+print(myModel, digits=4)
+```
+
+##EVALUATION
+
+Check the accuracy of the model by comparing the predictions to the actual results in the confusion matrix
+
+```{r}
+predTest <- predict(myModel, newdata=inTrain_crossval)
+
+confusionMatrix(predTest, inTrain_crossval$classe)
+```
+
+##Our out-of-sample error rate is expected to be approximately  0.0023 or 0.23%. Then, let apply the final model to our testing dataset
+
+Final Model data and important predictors in the model
+
+```{r}
+myModel$finalModel
+```
+
+
+```{r}
+varImp(myModel)
+```
+
+With 27 variables were tried at each split and the reported OOB Estimated Error is a low 0.86%. We have sufficient confidence in the prediction model to predict classe for the 20 different test cases.
+
+
+
+
+
+#Prediction
+Use the model to predict in the test set
+
+```{r}
+print(predict(myModel, newdata=testing))
+```
+
+
+#Conclusion
+###The random forest algorith outperforms the decision tree in terms of accuracy. We are getting 99.77% in sample accuracy, while the decision tree gives us 49.68% in sample accuracy. We are using random forest to predict classe for the 20 different test cases.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
